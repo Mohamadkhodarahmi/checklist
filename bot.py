@@ -402,18 +402,7 @@ def main():
     dp = updater.dispatcher
 
     # Command handlers
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("add", add_task))
-    dp.add_handler(CommandHandler("show", show_checklist))
-    dp.add_handler(CommandHandler("new_checklist", new_checklist))
-    dp.add_handler(CommandHandler("upgrade", upgrade_premium))
-    
-    # Callback query handler for buttons
-    dp.add_handler(CallbackQueryHandler(button_handler))
-    
-    # Payment handlers
-    dp.add_handler(PreCheckoutQueryHandler(pre_checkout_callback))
-    dp.add_handler(MessageHandler(Filters.successful_payment, successful_payment_callback))
+    dp.add_handler(CommandHandler("start", start))ayment, successful_payment_callback))
 
     # Start the Bot
     updater.start_polling()
