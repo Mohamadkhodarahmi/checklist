@@ -33,9 +33,9 @@ if not TOKEN:
     raise ValueError("Please set TOKEN environment variable in Railway.")
 
 # The bot's provider token for Telegram Stars
-# This is a TEST token from Telegram. For a live bot, you must get your own.
-# You can get a test token from @BotFather
-PROVIDER_TOKEN = "381764678:TEST:25838" 
+# As per the provided documentation for digital goods and services,
+# this parameter can be left empty.
+PROVIDER_TOKEN = "" 
 
 # Persistent storage path
 TASK_FILE = os.path.join(os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "."), "tasks.json")
