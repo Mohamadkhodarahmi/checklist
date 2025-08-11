@@ -35,7 +35,7 @@ if not TOKEN:
 # The bot's provider token for Telegram Stars
 # This is a TEST token from Telegram. For a live bot, you must get your own.
 # You can get a test token from @BotFather
-PROVIDER_TOKEN = "381764678:TEST:25838" 
+PROVIDER_TOKEN = "2051251535:TEST:OTk5MDA4ODgxLTAwNQ" 
 
 # Persistent storage path
 TASK_FILE = os.path.join(os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "."), "tasks.json")
