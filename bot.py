@@ -63,6 +63,7 @@ def ensure_user_exists(chat_id):
     """
     Ensures a user has an entry in the data file.
     Initializes a default "Daily" checklist for new users.
+    Adds missing keys for old users.
     """
     data = load_data()
     chat_id_str = str(chat_id)
@@ -73,7 +74,24 @@ def ensure_user_exists(chat_id):
                 "Daily": {"tasks": [], "done": []}
             }
         }
-        save_data(data)
+    else:
+        # Check for and add missing keys for existing users
+        if "is_premium" not in data[chat_id_str]:
+            data[chat_id_str]["is_premium"] = False
+        if "checklists" not in data[chat_id_str]:
+            # Move old tasks to a new "Daily" checklist
+            old_tasks = data[chat_id_str].get("tasks", [])
+            old_done = data[chat_id_str].get("done", [])
+            data[chat_id_str]["checklists"] = {
+                "Daily": {"tasks": old_tasks, "done": old_done}
+            }
+            # Remove the old top-level keys
+            if "tasks" in data[chat_id_str]:
+                del data[chat_id_str]["tasks"]
+            if "done" in data[chat_id_str]:
+                del data[chat_id_str]["done"]
+    
+    save_data(data)
     return data[chat_id_str]
 
 
@@ -154,7 +172,7 @@ def add_task(update: Update, context: CallbackContext):
 
     args = context.args
     if not args:
-        update.message.reply_text("Usage: /add <checklist_name> <task>")
+        update.message.reply_text("Usage: /add <task>")
         return
 
     # Check if the user is premium
