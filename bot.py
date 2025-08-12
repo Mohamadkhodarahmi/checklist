@@ -292,7 +292,7 @@ def get_checklist_list_markup(chat_id):
     buttons = []
     
     for name, checklist_data in user_data["checklists"].items():
-        checklist = Checklist.from_dict(checklist_data)
+        checklist = Checklist.from_dict(checklist_name, checklist_data)
         completed, total = checklist.get_progress()
         
         if total > 0:
@@ -322,7 +322,7 @@ def send_checklist_message(chat_id, checklist_name="Daily"):
         bot.send_message(chat_id=chat_id, text=f"❌ Checklist '{checklist_name}' not found.")
         return
     
-    checklist = Checklist.from_dict(checklist_data)
+    checklist = Checklist.from_dict(checklist_name, checklist_data)
     completed, total = checklist.get_progress()
     
     header = f"📋 *{checklist_name}* -- {today}\n"
@@ -470,7 +470,8 @@ def add_task(update: Update, context: CallbackContext):
         update.message.reply_text(f"❌ Checklist '{checklist_name}' does not exist.")
         return
     
-    checklist = Checklist.from_dict(checklist_data)
+    checklist = Checklist.from_dict(checklist_name, checklist_data)
+
     task = checklist.add_task(task_text)
     
     data[str(chat_id)]["checklists"][checklist_name] = checklist.to_dict()
@@ -851,7 +852,7 @@ def stats_command(update: Update, context: CallbackContext):
     checklist_stats = []
     
     for name, checklist_data in user_data["checklists"].items():
-        checklist = Checklist.from_dict(checklist_data)
+        checklist = Checklist.from_dict(checklist_name, checklist_data)
         completed, total = checklist.get_progress()
         total_tasks += total
         completed_tasks += completed
@@ -1003,7 +1004,7 @@ def button_handler(update: Update, context: CallbackContext):
             checklist_stats = []
             
             for name, checklist_data in user_data.get("checklists", {}).items():
-                checklist = Checklist.from_dict(checklist_data)
+                checklist = Checklist.from_dict(checklist_name, checklist_data)
                 completed, total = checklist.get_progress()
                 total_tasks += total
                 completed_tasks += completed
@@ -1051,7 +1052,7 @@ def button_handler(update: Update, context: CallbackContext):
             checklist_name, task_id = parts[1], parts[2]
             
             if checklist_data := user_data.get("checklists", {}).get(checklist_name):
-                checklist = Checklist.from_dict(checklist_data)
+                checklist = Checklist.from_dict(checklist_name, checklist_data)
                 if checklist.toggle_task(task_id):
                     data[str(chat_id)]["checklists"][checklist_name] = checklist.to_dict()
                     save_data(data)
@@ -1112,7 +1113,7 @@ def button_handler(update: Update, context: CallbackContext):
             checklist_name = name_part.replace("_", " ")
 
             if checklist_data := user_data.get("checklists", {}).get(checklist_name):
-                checklist = Checklist.from_dict(checklist_data)
+                checklist = Checklist.from_dict(checklist_name, checklist_data)
                 task = checklist.get_task_by_id(task_id)
                 if task and checklist.remove_task(task_id):
                     data[str(chat_id)]["checklists"][checklist_name] = checklist.to_dict()
@@ -1263,7 +1264,7 @@ def handle_task_text(update: Update, context: CallbackContext):
             del context.user_data['waiting_for_task']
             return
             
-        checklist = Checklist.from_dict(checklist_data)
+        checklist = Checklist.from_dict(checklist_name, checklist_data)
         checklist.add_task(task_text)
         
         data[str(chat_id)]["checklists"][checklist_name] = checklist.to_dict()
@@ -1293,7 +1294,7 @@ def reset_tasks():
         for user_id, user_data in data.items():
             try:
                 for checklist_name, checklist_data in user_data.get("checklists", {}).items():
-                    checklist = Checklist.from_dict(checklist_data)
+                    checklist = Checklist.from_dict(checklist_name, checklist_data)
                     checklist.reset_all()
                     user_data["checklists"][checklist_name] = checklist.to_dict()
                 
