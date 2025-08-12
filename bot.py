@@ -1085,7 +1085,8 @@ def button_handler(update: Update, context: CallbackContext):
                 return
         
             checklist_name = callback_data[12:].replace("_", " ")
-            checklist = Checklist.from_dict(user_data.get("checklists", {}).get(checklist_name, {}))
+            checklist_data = user_data.get("checklists", {}).get(checklist_name, {})
+            checklist = Checklist.from_dict(checklist_name, checklist_data)
 
             if not checklist.tasks:
                 query.answer("This checklist is empty.", show_alert=True)
