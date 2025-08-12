@@ -957,7 +957,7 @@ def button_handler(update: Update, context: CallbackContext):
     """Enhanced callback query handler with comprehensive functionality."""
     query = update.callback_query
     
-    # Fix: Handle cases where query.message might be None
+    # Handle cases where the original message is gone
     if not query.message:
         query.answer("This action is no longer available.", show_alert=True)
         return
@@ -965,6 +965,7 @@ def button_handler(update: Update, context: CallbackContext):
     chat_id = query.message.chat_id
     callback_data = query.data
     
+    # The main 'try' block should wrap all callback handling logic
     try:
         query.answer()
         
@@ -974,7 +975,7 @@ def button_handler(update: Update, context: CallbackContext):
         if callback_data == "noop":
             return
         
-        # Handle premium plan purchases
+        # --- Premium Plan Purchases ---
         elif callback_data.startswith("buy_"):
             plan_type = callback_data.split("_", 1)[1]
             if send_invoice_for_plan(chat_id, plan_type, context):
@@ -986,20 +987,17 @@ def button_handler(update: Update, context: CallbackContext):
         
         elif callback_data == "cancel_upgrade":
             query.edit_message_text("❌ Premium upgrade cancelled.")
-        
+
+        # --- Statistics Display ---
         elif callback_data == "show_stats":
             if not is_user_premium(chat_id):
                 send_premium_prompt(chat_id)
                 return
             
-            # Show stats in the same message
-            total_tasks = 0
-            completed_tasks = 0
-            total_checklists = len(user_data["checklists"])
-            
+            total_tasks, completed_tasks = 0, 0
             checklist_stats = []
             
-            for name, checklist_data in user_data["checklists"].items():
+            for name, checklist_data in user_data.get("checklists", {}).items():
                 checklist = Checklist.from_dict(checklist_data)
                 completed, total = checklist.get_progress()
                 total_tasks += total
@@ -1013,346 +1011,168 @@ def button_handler(update: Update, context: CallbackContext):
             
             overall_percentage = int((completed_tasks / total_tasks) * 100) if total_tasks > 0 else 0
             
-            # Get premium plan info
             plan_type = user_data.get("premium_plan", "basic")
             expiry = user_data.get("premium_expires")
+            plan_info = f"Plan: {plan_type.title()}"
             if expiry:
                 expiry_date = datetime.datetime.fromisoformat(expiry).strftime("%B %d, %Y")
-                plan_info = f"Plan: {plan_type.title()} (expires {expiry_date})"
-            else:
-                plan_info = f"Plan: {plan_type.title()}"
+                plan_info += f" (expires {expiry_date})"
             
+            # This string assignment is now corrected and complete
             stats_text = (
                 f"📊 *Your Productivity Stats:*\n\n"
                 f"⭐ {plan_info}\n\n"
                 f"📈 *Overall Progress:*\n{overall_percentage}% ({completed_tasks}/{total_tasks} tasks)\n\n"
                 f"🗒️ *Checklist Breakdown:*\n" +
-                "\n".join(checklist_stats) # <-- Add the checklist stats here
-                        )
-    user_data = ensure_user_exists(chat_id)
-    checklist_data = user_data["checklists"].get(checklist_name)
-    
-    if not checklist_data:
-        return InlineKeyboardMarkup([[InlineKeyboardButton("❌ Checklist not found", callback_data="noop")]])
-    
-    checklist = Checklist.from_dict(checklist_data)
-    buttons = []
-    
-    completed, total = checklist.get_progress()
-    progress_text = f"Progress: {completed}/{total}"
-    if total > 0:
-        percentage = int((completed / total) * 100)
-        progress_bar = "▓" * (percentage // 10) + "░" * (10 - percentage // 10)
-        progress_text = f"{progress_bar} {percentage}%"
-    
-    buttons.append([InlineKeyboardButton(progress_text, callback_data="noop")])
-    
-    for task in checklist.tasks:
-        icon = "✅" if task.completed else "⬜️"
-        label = f"{icon} {task.text}"
-        if len(label) > 35:
-            label = label[:32] + "..."
-        buttons.append([InlineKeyboardButton(label, callback_data=f"toggle_{checklist_name}_{task.id}")])
-    
-    action_buttons = []
-    if is_user_premium(chat_id):
-        # FIX: Create a "safe" checklist name for callback_data by replacing spaces
-        clean_checklist_name = checklist_name.replace(" ", "_")
-        action_buttons.extend([
-            InlineKeyboardButton("➕ Add", callback_data=f"add_task_{clean_checklist_name}"),
-            InlineKeyboardButton("🗑️ Delete", callback_data=f"delete_mode_{clean_checklist_name}")
-        ])
-    
-    action_buttons.extend([
-        InlineKeyboardButton("🔄 Refresh", callback_data=f"refresh_{checklist_name}"),
-        InlineKeyboardButton("❌ Close", callback_data=f"close_{checklist_name}")
-    ])
-    
-    if action_buttons:
-        if len(action_buttons) > 2:
-            buttons.append(action_buttons[:2])
-            buttons.append(action_buttons[2:])
-        else:
-            buttons.append(action_buttons)
-    
-    return InlineKeyboardMarkup(buttons)
+                "\n".join(checklist_stats)
+            )
+            
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔄 Refresh", callback_data="show_stats")],
                 [InlineKeyboardButton("📋 View Lists", callback_data="show_all_lists")],
                 [InlineKeyboardButton("❌ Close", callback_data="close_stats")]
             ])
             
-            try:
-                query.edit_message_text(
-                    stats_text,
-                    parse_mode="Markdown",
-                    reply_markup=keyboard
-                )
-            except BadRequest:
-                bot.send_message(
-                    chat_id=chat_id,
-                    text=stats_text,
-                    parse_mode="Markdown",
-                    reply_markup=keyboard
-                )
+            query.edit_message_text(stats_text, parse_mode="Markdown", reply_markup=keyboard)
         
         elif callback_data == "close_stats":
             query.edit_message_text("📊 Statistics closed.")
-        
+
+        # --- Task & Checklist Management ---
         elif callback_data.startswith("toggle_"):
             parts = callback_data.split("_", 2)
-            if len(parts) < 3:
-                return
-                
-            checklist_name = parts[1]
-            task_id = parts[2]
+            if len(parts) < 3: return
             
-            checklist_data = user_data["checklists"].get(checklist_name)
-            if checklist_data:
+            checklist_name, task_id = parts[1], parts[2]
+            
+            if checklist_data := user_data.get("checklists", {}).get(checklist_name):
                 checklist = Checklist.from_dict(checklist_data)
                 if checklist.toggle_task(task_id):
                     data[str(chat_id)]["checklists"][checklist_name] = checklist.to_dict()
                     save_data(data)
-                    
-                    # Check if message still exists before editing
-                    try:
-                        query.edit_message_reply_markup(
-                            reply_markup=get_checklist_markup(chat_id, checklist_name)
-                        )
-                    except BadRequest as e:
-                        if "message is not modified" not in str(e).lower():
-                            logger.warning(f"Could not edit message: {e}")
-        
-        elif callback_data.startswith("showlist_"):
-            checklist_name = callback_data.split("_", 1)[1]
-            # Send new message instead of editing if possible
-            try:
-                send_checklist_message(chat_id, checklist_name)
-            except Exception as e:
-                logger.error(f"Error sending checklist message: {e}")
-                query.answer("Error displaying checklist. Please try /show command.", show_alert=True)
+                    query.edit_message_reply_markup(reply_markup=get_checklist_markup(chat_id, checklist_name))
         
         elif callback_data.startswith("refresh_"):
             checklist_name = callback_data.split("_", 1)[1]
-            try:
-                query.edit_message_reply_markup(
-                    reply_markup=get_checklist_markup(chat_id, checklist_name)
-                )
-            except BadRequest as e:
-                if "message is not modified" not in str(e).lower():
-                    logger.warning(f"Could not refresh message: {e}")
-        
+            query.edit_message_reply_markup(reply_markup=get_checklist_markup(chat_id, checklist_name))
+
         elif callback_data.startswith("close_"):
             checklist_name = callback_data.split("_", 1)[1]
-            try:
-                query.edit_message_text(f"📋 Checklist '{checklist_name}' closed.")
-            except BadRequest as e:
-                query.answer(f"Checklist '{checklist_name}' closed.", show_alert=True)
-        
-        elif callback_data.startswith("delete_mode_"):
-            if not is_user_premium(chat_id):
-                send_premium_prompt(chat_id)
-                return
-        
-            # Remove "delete_mode_" prefix (12 characters) and convert underscores back to spaces
-            checklist_name_with_underscores = callback_data[12:]
-            checklist_name = checklist_name_with_underscores.replace("_", " ")
-    
-            checklist_data = user_data["checklists"].get(checklist_name)
-    
-            if checklist_data:
-                checklist = Checklist.from_dict(checklist_data)
-                if not checklist.tasks:
-                    query.answer("No tasks to delete!", show_alert=True)
-                    return
-        
-                buttons = []
-                for task in checklist.tasks:
-                    label = f"🗑️ {task.text[:30]}{'...' if len(task.text) > 30 else ''}"
-                    # Use the same underscore conversion for consistency
-                    safe_checklist_name = checklist_name.replace(" ", "_")
-                    buttons.append([InlineKeyboardButton(
-                    label, 
-                    callback_data=f"delete_task_{safe_checklist_name}_{task.id}"
-            )])
-        
-            buttons.append([InlineKeyboardButton("❌ Cancel", callback_data=f"refresh_{checklist_name}")])
-        
-            try:
-                query.edit_message_text(
-                    f"🗑️ *Delete Task from {checklist_name}*\n\nSelect a task to delete:",
-                    parse_mode="Markdown",
-                    reply_markup=InlineKeyboardMarkup(buttons)
-            )
-            except BadRequest as e:
-                logger.warning(f"Could not edit message for delete mode: {e}")
-                query.answer("Please try the delete action again.", show_alert=True)
-        
-        elif callback_data.startswith("delete_task_"):
-            if not is_user_premium(chat_id):
-                return
-        
-            # This is trickier because format is: delete_task_Checklist_Name_With_Spaces_<task_id>
-            # Task ID is always UUID format, so we can split from the right
-            task_id = callback_data.split("_")[-1]  # Get the last part (task_id)
-    
-            # Remove "delete_task_" prefix and the "_<task_id>" suffix
-            middle_part = callback_data[12:]  # Remove "delete_task_"
-            checklist_name_with_underscores = middle_part.rsplit(f"_{task_id}", 1)[0]  # Remove "_<task_id>"
-            checklist_name = checklist_name_with_underscores.replace("_", " ")
-    
-            checklist_data = user_data["checklists"].get(checklist_name)
-            if checklist_data:
-                checklist = Checklist.from_dict(checklist_data)
-                task = checklist.get_task_by_id(task_id)
-        
-                if task and checklist.remove_task(task_id):
-                    data[str(chat_id)]["checklists"][checklist_name] = checklist.to_dict()
-                    save_data(data)
-            
-                    query.answer(f"Task '{task.text}' deleted!", show_alert=True)
-                    send_checklist_message(chat_id, checklist_name)
-        
-        elif callback_data.startswith("confirm_delete_"):
-            checklist_name = callback_data.split("_", 2)[2]
-            
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Yes, Delete Forever", callback_data=f"delete_confirmed_{checklist_name}")],
-                [InlineKeyboardButton("❌ Cancel", callback_data="cancel_delete")]
-            ])
-            
-            try:
-                query.edit_message_text(
-                    f"⚠️ *Final Confirmation*\n\n"
-                    f"Delete checklist '*{checklist_name}*' and all its tasks?\n\n"
-                    f"This action cannot be undone!",
-                    parse_mode="Markdown",
-                    reply_markup=keyboard
-                )
-            except BadRequest as e:
-                logger.warning(f"Could not edit confirmation message: {e}")
-                query.answer("Please try the delete action again.", show_alert=True)
-        
-        elif callback_data.startswith("delete_confirmed_"):
-            if not is_user_premium(chat_id):
-                return
-                
-            checklist_name = callback_data.split("_", 2)[2]
-            
-            if checklist_name in user_data["checklists"] and checklist_name != "Daily":
-                del data[str(chat_id)]["checklists"][checklist_name]
-                save_data(data)
-                
-                try:
-                    query.edit_message_text(f"✅ Checklist '{checklist_name}' has been deleted.")
-                except BadRequest:
-                    query.answer(f"Checklist '{checklist_name}' has been deleted.", show_alert=True)
-            else:
-                try:
-                    query.edit_message_text("❌ Error: Could not delete checklist.")
-                except BadRequest:
-                    query.answer("Error: Could not delete checklist.", show_alert=True)
-        
-        elif callback_data == "cancel_delete":
-            try:
-                query.edit_message_text("❌ Deletion cancelled.")
-            except BadRequest:
-                query.answer("Deletion cancelled.", show_alert=True)
+            query.edit_message_text(f"📋 Checklist '{checklist_name}' closed.")
 
         elif callback_data.startswith("add_task_"):
             if not is_user_premium(chat_id):
                 send_premium_prompt(chat_id)
                 return
-
-            checklist_name_with_underscores = callback_data[9:]
-            checklist_name = checklist_name_with_underscores.replace("_", " ")
-
+            checklist_name = callback_data[9:].replace("_", " ")
             context.user_data['waiting_for_task'] = checklist_name
-
             context.bot.send_message(
                 chat_id=chat_id,
-                text=f"📝 Please send me the task you want to add to '*{checklist_name}*'.",
+                text=f"📝 Please send the task to add to '*{checklist_name}*'.",
                 parse_mode="Markdown"
-            )        
+            )
+
+        # --- Deletion Flow (for Tasks and Checklists) ---
+        elif callback_data.startswith("delete_mode_"):
+            if not is_user_premium(chat_id):
+                send_premium_prompt(chat_id)
+                return
         
+            checklist_name = callback_data[12:].replace("_", " ")
+            checklist = Checklist.from_dict(user_data.get("checklists", {}).get(checklist_name, {}))
+
+            if not checklist.tasks:
+                query.answer("This checklist is empty.", show_alert=True)
+                return
+            
+            buttons = []
+            safe_name = checklist_name.replace(" ", "_")
+            for task in checklist.tasks:
+                label = f"🗑️ {task.text[:30]}{'...' if len(task.text) > 30 else ''}"
+                buttons.append([InlineKeyboardButton(label, callback_data=f"delete_task_{safe_name}_{task.id}")])
+        
+            buttons.append([InlineKeyboardButton("❌ Cancel", callback_data=f"refresh_{checklist_name}")])
+            query.edit_message_text(
+                f"🗑️ *Delete Task from {checklist_name}*\nSelect a task to remove:",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(buttons)
+            )
+
+        # Using the robust logic to handle names with spaces/underscores
+        elif callback_data.startswith("delete_task_"):
+            if not is_user_premium(chat_id): return
+        
+            task_id = callback_data.split("_")[-1]
+            name_part = callback_data[12:].rsplit(f"_{task_id}", 1)[0]
+            checklist_name = name_part.replace("_", " ")
+
+            if checklist_data := user_data.get("checklists", {}).get(checklist_name):
+                checklist = Checklist.from_dict(checklist_data)
+                task = checklist.get_task_by_id(task_id)
+                if task and checklist.remove_task(task_id):
+                    data[str(chat_id)]["checklists"][checklist_name] = checklist.to_dict()
+                    save_data(data)
+                    query.answer(f"Task '{task.text[:30]}...' deleted!", show_alert=True)
+                    # Refresh the checklist message
+                    query.edit_message_reply_markup(reply_markup=get_checklist_markup(chat_id, checklist_name))
+
+        elif callback_data.startswith("confirm_delete_"):
+            checklist_name = callback_data.split("_", 2)[2]
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Yes, Delete Forever", callback_data=f"delete_confirmed_{checklist_name}")],
+                [InlineKeyboardButton("❌ Cancel", callback_data="show_all_lists")]
+            ])
+            query.edit_message_text(
+                f"⚠️ *Final Confirmation*\n\nDelete checklist '*{checklist_name}*' and all its tasks? This cannot be undone!",
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+        
+        elif callback_data.startswith("delete_confirmed_"):
+            if not is_user_premium(chat_id): return
+            checklist_name = callback_data.split("_", 2)[2]
+            
+            if checklist_name in user_data.get("checklists", {}) and checklist_name != "Daily":
+                del data[str(chat_id)]["checklists"][checklist_name]
+                save_data(data)
+                query.edit_message_text(f"✅ Checklist '{checklist_name}' has been deleted.")
+            else:
+                query.edit_message_text("❌ Error: Could not delete this checklist.")
+
+        elif callback_data == "cancel_delete":
+            query.edit_message_text("❌ Deletion cancelled.")
+
+        # --- List Management ---
+        elif callback_data.startswith("showlist_"):
+            checklist_name = callback_data.split("_", 1)[1]
+            send_checklist_message(chat_id, checklist_name)
+        
+        elif callback_data == "show_all_lists":
+            query.edit_message_text(
+                "📋 *Your Checklists:*",
+                parse_mode="Markdown",
+                reply_markup=get_checklist_list_markup(chat_id)
+            )
+            
         elif callback_data == "create_new_list":
             if not is_user_premium(chat_id):
                 send_premium_prompt(chat_id)
                 return
-                
-            try:
-                query.edit_message_text(
-                    "➕ *Create New Checklist*\n\n"
-                    "Use the command: `/new_checklist <name>`\n\n"
-                    "*Examples:*\n"
-                    "• `/new_checklist Work Tasks`\n"
-                    "• `/new_checklist Shopping List`\n"
-                    "• `/new_checklist Weekly Goals`",
-                    parse_mode="Markdown"
-                )
-            except BadRequest:
-                bot.send_message(
-                    chat_id=chat_id,
-                    text=(
-                        "➕ *Create New Checklist*\n\n"
-                        "Use the command: `/new_checklist <name>`\n\n"
-                        "*Examples:*\n"
-                        "• `/new_checklist Work Tasks`\n"
-                        "• `/new_checklist Shopping List`\n"
-                        "• `/new_checklist Weekly Goals`"
-                    ),
-                    parse_mode="Markdown"
-                )
-        
-        elif callback_data == "show_all_lists":
-            try:
-                bot.send_message(
-                    chat_id=chat_id,
-                    text="📋 *Your Checklists:*",
-                    parse_mode="Markdown",
-                    reply_markup=get_checklist_list_markup(chat_id)
-                )
-            except Exception as e:
-                logger.error(f"Error showing all lists: {e}")
-                query.answer("Error displaying checklists. Please try /show command.", show_alert=True)
-        
-        elif callback_data == "upgrade_prompt":
-            try:
-                # Show upgrade options instead of direct payment
-                upgrade_premium(update, context)
-            except Exception as e:
-                logger.error(f"Error in upgrade prompt: {e}")
-                query.answer("Error starting upgrade process. Please try /upgrade command.", show_alert=True)
-        
-        elif callback_data == "settings":elif callback_data.startswith("delete_task_"):
-            if not is_user_premium(chat_id):
-                return
-                
-            parts = callback_data.split("_", 3)
-            if len(parts) < 4:
-                return
-                
-            checklist_name = parts[2]
-            task_id = parts[3]
+            query.edit_message_text(
+                "➕ *Create New Checklist*\n\nUse the command: `/new <name>`\n\n*Examples:*\n• `/new Work Project`\n• `/new Shopping List`",
+                parse_mode="Markdown"
+            )
+
+        # --- Settings ---
+        # This is now its own separate, correct 'elif' block
+        elif callback_data == "settings":
+            settings = user_data.get("settings", {})
+            plan_type = user_data.get("premium_plan", "basic").title()
             
-            checklist_data = user_data["checklists"].get(checklist_name)
-            if checklist_data:
-                checklist = Checklist.from_dict(checklist_data)
-                task = checklist.get_task_by_id(task_id)
-                
-                if task and checklist.remove_task(task_id):
-                    data[str(chat_id)]["checklists"][checklist_name] = checklist.to_dict()
-                    save_data(data)
-                    
-                    query.answer(f"Task '{task.text}' deleted!", show_alert=True)
-                    send_checklist_message(chat_id, checklist_name)
             settings_text = (
-                "⚙️ *Your Settings:*\n\n"
-                f"⭐ Premium Plan: {plan_info}\n"
-                f"🕐 Daily Reset Time: {settings.get('daily_reset_time', '08:00')}\n"
-                f"🌍 Timezone: {settings.get('timezone', 'UTC')}\n"
-                f"🔔 Notifications: {'Enabled' if settings.get('notifications_enabled', True) else 'Disabled'}\n\n"
-                f"Premium features are active!"
+                f"⚙️ *Your Settings:*\n\n"
+                f"⭐ Premium Plan: {plan_type}\n"
+                f"🔔 Notifications: {'Enabled' if settings.get('notifications_enabled', True) else 'Disabled'}"
             )
             
             keyboard = InlineKeyboardMarkup([
@@ -1360,85 +1180,39 @@ def button_handler(update: Update, context: CallbackContext):
                 [InlineKeyboardButton("⭐ Upgrade Plan", callback_data="upgrade_prompt")],
                 [InlineKeyboardButton("❌ Close", callback_data="close_settings")]
             ])
-            
-            try:
-                query.edit_message_text(
-                    settings_text,
-                    parse_mode="Markdown",
-                    reply_markup=keyboard
-                )
-            except BadRequest:
-                bot.send_message(
-                    chat_id=chat_id,
-                    text=settings_text,
-                    parse_mode="Markdown",
-                    reply_markup=keyboard
-                )
-        
+            query.edit_message_text(settings_text, parse_mode="Markdown", reply_markup=keyboard)
+
         elif callback_data == "close_settings":
-            try:
-                query.edit_message_text("⚙️ Settings closed.")
-            except BadRequest:
-                query.answer("Settings closed.", show_alert=True)
-        
-        elif callback_data == "toggle_notifications":
-            if not is_user_premium(chat_id):
-                return
-                
-            settings = user_data.get("settings", {})
-            current = settings.get("notifications_enabled", True)
-            settings["notifications_enabled"] = not current
+            query.edit_message_text("⚙️ Settings closed.")
             
+        elif callback_data == "toggle_notifications":
+            if not is_user_premium(chat_id): return
+            
+            settings = user_data.get("settings", {})
+            current_status = settings.get("notifications_enabled", True)
+            settings["notifications_enabled"] = not current_status
             data[str(chat_id)]["settings"] = settings
             save_data(data)
             
-            status = "enabled" if not current else "disabled"
+            status = "enabled" if not current_status else "disabled"
             query.answer(f"Notifications {status}!", show_alert=True)
-            
-            # Update the settings display
-            plan_type = user_data.get("premium_plan", "basic")
-            expiry = user_data.get("premium_expires")
-            if expiry:
-                expiry_date = datetime.datetime.fromisoformat(expiry).strftime("%B %d, %Y")
-                plan_info = f"{plan_type.title()} (expires {expiry_date})"
-            else:
-                plan_info = f"{plan_type.title()}"
-            
-            settings_text = (
-                "⚙️ *Your Settings:*\n\n"
-                f"⭐ Premium Plan: {plan_info}\n"
-                f"🕐 Daily Reset Time: {settings.get('daily_reset_time', '08:00')}\n"
-                f"🌍 Timezone: {settings.get('timezone', 'UTC')}\n"
-                f"🔔 Notifications: {'Enabled' if settings.get('notifications_enabled', True) else 'Disabled'}\n\n"
-                f"Premium features are active!"
-            )
-            
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔔 Toggle Notifications", callback_data="toggle_notifications")],
-                [InlineKeyboardButton("⭐ Upgrade Plan", callback_data="upgrade_prompt")],
-                [InlineKeyboardButton("❌ Close", callback_data="close_settings")]
-            ])
-            
-            try:
-                query.edit_message_text(
-                    settings_text,
-                    parse_mode="Markdown",
-                    reply_markup=keyboard
-                )
-            except BadRequest:
-                pass  # If we can't edit, the answer above will suffice
-        
+            # Trigger the 'settings' callback again to refresh the message
+            context.bot.callback_query_handlers[0].callback(update, context)
+
+
+        # --- Fallback for unknown data ---
         else:
-            # Handle unknown callback data
-            logger.warning(f"Unknown callback data: {callback_data}")
-            query.answer("Unknown action.", show_alert=True)
-        
+            logger.warning(f"Unknown callback data from {chat_id}: {callback_data}")
+            query.answer("Unknown or outdated action.", show_alert=True)
+
+    # These 'except' blocks now correctly close the 'try' block
     except BadRequest as e:
-        logger.warning(f"BadRequest in button handler: {e}")
-        query.answer("This action is no longer available. Please try again.", show_alert=True)
+        if "message is not modified" not in str(e).lower():
+            logger.warning(f"BadRequest in button handler: {e}")
+            query.answer("An error occurred. The message might be outdated.", show_alert=True)
     except Exception as e:
-        logger.error(f"Error in button handler: {e}")
-        query.answer("An error occurred. Please try again.", show_alert=True)
+        logger.error(f"Error in button handler: {e}", exc_info=True)
+        query.answer("An unexpected error occurred. Please try again.", show_alert=True)
 
 # -----------------------
 # Enhanced Daily Reset
