@@ -108,16 +108,21 @@ class Checklist:
             task.completed = False
 
     def to_dict(self):
+        """
+        Saves only the essential data. The name is the dictionary key,
+        so it doesn't need to be stored inside the object itself.
+        """
         return {
-            "name": self.name,
             "tasks": [task.to_dict() for task in self.tasks]
         }
 
     @classmethod
-    def from_dict(cls, data):
-        checklist = cls(data["name"])
-        checklist.tasks = [Task.from_dict(task_data) for task_data in data.get("tasks", [])]
-        return checklist
+    def from_dict(cls, name, data):
+        """
+        Creates a Checklist object from its name (the key) and its data.
+        """
+        tasks = [Task.from_dict(task_data) for task_data in data.get("tasks", [])]
+        return cls(name=name, tasks=tasks)
 
 # -----------------------
 # Enhanced Data Storage
@@ -239,7 +244,7 @@ def get_checklist_markup(chat_id, checklist_name="Daily"):
     if not checklist_data:
         return InlineKeyboardMarkup([[InlineKeyboardButton("❌ Checklist not found", callback_data="noop")]])
     
-    checklist = Checklist.from_dict(checklist_data)
+    checklist = Checklist.from_dict(checklist_name,checklist_data)
     buttons = []
     
     completed, total = checklist.get_progress()
