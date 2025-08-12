@@ -1078,6 +1078,9 @@ def button_handler(update: Update, context: CallbackContext):
                 parse_mode="Markdown"
             )
 
+        elif callback_data == "upgrade_prompt":
+            upgrade_premium(update, context)    
+
         # --- Deletion Flow (for Tasks and Checklists) ---
         elif callback_data.startswith("delete_mode_"):
             if not is_user_premium(chat_id):
