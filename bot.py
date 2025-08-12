@@ -1023,9 +1023,12 @@ def button_handler(update: Update, context: CallbackContext):
                 plan_info = f"Plan: {plan_type.title()}"
             
             stats_text = (
-                "📊 *Your Productivity Stats:*\n\n"
-                f"⭐ {plan_info}\n\n"def get_checklist_markup(chat_id, checklist_name="Daily"):
-    """Generates an enhanced inline keyboard markup for a specific checklist.""")
+                f"📊 *Your Productivity Stats:*\n\n"
+                f"⭐ {plan_info}\n\n"
+                f"📈 *Overall Progress:*\n{overall_percentage}% ({completed_tasks}/{total_tasks} tasks)\n\n"
+                f"🗒️ *Checklist Breakdown:*\n" +
+                "\n".join(checklist_stats) # <-- Add the checklist stats here
+                        )
     user_data = ensure_user_exists(chat_id)
     checklist_data = user_data["checklists"].get(checklist_name)
     
