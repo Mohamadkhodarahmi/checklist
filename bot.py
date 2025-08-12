@@ -260,9 +260,11 @@ def get_checklist_markup(chat_id, checklist_name="Daily"):
     
     action_buttons = []
     if is_user_premium(chat_id):
+        # FIX: Create a "safe" checklist name for callback_data by replacing spaces
+        clean_checklist_name = checklist_name.replace(" ", "_")
         action_buttons.extend([
             InlineKeyboardButton("➕ Add", callback_data=f"add_task_{clean_checklist_name}"),
-            InlineKeyboardButton("🗑️ Delete", callback_data=f"delete_mode_{checklist_name}")
+            InlineKeyboardButton("🗑️ Delete", callback_data=f"delete_mode_{clean_checklist_name}")
         ])
     
     action_buttons.extend([
@@ -1022,17 +1024,55 @@ def button_handler(update: Update, context: CallbackContext):
             
             stats_text = (
                 "📊 *Your Productivity Stats:*\n\n"
-                f"⭐ {plan_info}\n\n"
-                f"📋 Total Checklists: {total_checklists}\n"
-                f"📝 Total Tasks: {total_tasks}\n"
-                f"✅ Completed: {completed_tasks}\n"
-                f"📈 Overall Progress: {overall_percentage}%\n\n"
-                "*Checklist Breakdown:*\n" + "\n".join(checklist_stats[:5])  # Limit to 5 to avoid long messages
-            )
-            
-            if len(checklist_stats) > 5:
-                stats_text += f"\n... and {len(checklist_stats) - 5} more checklists"
-            
+                f"⭐ {plan_info}\n\n"def get_checklist_markup(chat_id, checklist_name="Daily"):
+    """Generates an enhanced inline keyboard markup for a specific checklist."""
+    user_data = ensure_user_exists(chat_id)
+    checklist_data = user_data["checklists"].get(checklist_name)
+    
+    if not checklist_data:
+        return InlineKeyboardMarkup([[InlineKeyboardButton("❌ Checklist not found", callback_data="noop")]])
+    
+    checklist = Checklist.from_dict(checklist_data)
+    buttons = []
+    
+    completed, total = checklist.get_progress()
+    progress_text = f"Progress: {completed}/{total}"
+    if total > 0:
+        percentage = int((completed / total) * 100)
+        progress_bar = "▓" * (percentage // 10) + "░" * (10 - percentage // 10)
+        progress_text = f"{progress_bar} {percentage}%"
+    
+    buttons.append([InlineKeyboardButton(progress_text, callback_data="noop")])
+    
+    for task in checklist.tasks:
+        icon = "✅" if task.completed else "⬜️"
+        label = f"{icon} {task.text}"
+        if len(label) > 35:
+            label = label[:32] + "..."
+        buttons.append([InlineKeyboardButton(label, callback_data=f"toggle_{checklist_name}_{task.id}")])
+    
+    action_buttons = []
+    if is_user_premium(chat_id):
+        # FIX: Create a "safe" checklist name for callback_data by replacing spaces
+        clean_checklist_name = checklist_name.replace(" ", "_")
+        action_buttons.extend([
+            InlineKeyboardButton("➕ Add", callback_data=f"add_task_{clean_checklist_name}"),
+            InlineKeyboardButton("🗑️ Delete", callback_data=f"delete_mode_{clean_checklist_name}")
+        ])
+    
+    action_buttons.extend([
+        InlineKeyboardButton("🔄 Refresh", callback_data=f"refresh_{checklist_name}"),
+        InlineKeyboardButton("❌ Close", callback_data=f"close_{checklist_name}")
+    ])
+    
+    if action_buttons:
+        if len(action_buttons) > 2:
+            buttons.append(action_buttons[:2])
+            buttons.append(action_buttons[2:])
+        else:
+            buttons.append(action_buttons)
+    
+    return InlineKeyboardMarkup(buttons)
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔄 Refresh", callback_data="show_stats")],
                 [InlineKeyboardButton("📋 View Lists", callback_data="show_all_lists")],
@@ -1110,56 +1150,63 @@ def button_handler(update: Update, context: CallbackContext):
             if not is_user_premium(chat_id):
                 send_premium_prompt(chat_id)
                 return
-                
-            checklist_name = callback_data.split("_", 2)[2]
+        
+            # Remove "delete_mode_" prefix (12 characters) and convert underscores back to spaces
+            checklist_name_with_underscores = callback_data[12:]
+            checklist_name = checklist_name_with_underscores.replace("_", " ")
+    
             checklist_data = user_data["checklists"].get(checklist_name)
-            
+    
             if checklist_data:
                 checklist = Checklist.from_dict(checklist_data)
                 if not checklist.tasks:
                     query.answer("No tasks to delete!", show_alert=True)
                     return
-                
+        
                 buttons = []
                 for task in checklist.tasks:
                     label = f"🗑️ {task.text[:30]}{'...' if len(task.text) > 30 else ''}"
+                    # Use the same underscore conversion for consistency
+                    safe_checklist_name = checklist_name.replace(" ", "_")
                     buttons.append([InlineKeyboardButton(
-                        label, 
-                        callback_data=f"delete_task_{checklist_name}_{task.id}"
-                    )])
-                
-                buttons.append([InlineKeyboardButton("❌ Cancel", callback_data=f"refresh_{checklist_name}")])
-                
-                try:
-                    query.edit_message_text(
-                        f"🗑️ *Delete Task from {checklist_name}*\n\nSelect a task to delete:",
-                        parse_mode="Markdown",
-                        reply_markup=InlineKeyboardMarkup(buttons)
-                    )
-                except BadRequest as e:
-                    logger.warning(f"Could not edit message for delete mode: {e}")
-                    query.answer("Please try the delete action again.", show_alert=True)
+                    label, 
+                    callback_data=f"delete_task_{safe_checklist_name}_{task.id}"
+            )])
+        
+            buttons.append([InlineKeyboardButton("❌ Cancel", callback_data=f"refresh_{checklist_name}")])
+        
+            try:
+                query.edit_message_text(
+                    f"🗑️ *Delete Task from {checklist_name}*\n\nSelect a task to delete:",
+                    parse_mode="Markdown",
+                    reply_markup=InlineKeyboardMarkup(buttons)
+            )
+            except BadRequest as e:
+                logger.warning(f"Could not edit message for delete mode: {e}")
+                query.answer("Please try the delete action again.", show_alert=True)
         
         elif callback_data.startswith("delete_task_"):
             if not is_user_premium(chat_id):
                 return
-                
-            parts = callback_data.split("_", 3)
-            if len(parts) < 4:
-                return
-                
-            checklist_name = parts[2]
-            task_id = parts[3]
-            
+        
+            # This is trickier because format is: delete_task_Checklist_Name_With_Spaces_<task_id>
+            # Task ID is always UUID format, so we can split from the right
+            task_id = callback_data.split("_")[-1]  # Get the last part (task_id)
+    
+            # Remove "delete_task_" prefix and the "_<task_id>" suffix
+            middle_part = callback_data[12:]  # Remove "delete_task_"
+            checklist_name_with_underscores = middle_part.rsplit(f"_{task_id}", 1)[0]  # Remove "_<task_id>"
+            checklist_name = checklist_name_with_underscores.replace("_", " ")
+    
             checklist_data = user_data["checklists"].get(checklist_name)
             if checklist_data:
                 checklist = Checklist.from_dict(checklist_data)
                 task = checklist.get_task_by_id(task_id)
-                
+        
                 if task and checklist.remove_task(task_id):
                     data[str(chat_id)]["checklists"][checklist_name] = checklist.to_dict()
                     save_data(data)
-                    
+            
                     query.answer(f"Task '{task.text}' deleted!", show_alert=True)
                     send_checklist_message(chat_id, checklist_name)
         
@@ -1214,7 +1261,7 @@ def button_handler(update: Update, context: CallbackContext):
                 send_premium_prompt(chat_id)
                 return
 
-            checklist_name_with_underscores = callback_data.split("_", 2)[2]
+            checklist_name_with_underscores = callback_data[9:]
             checklist_name = checklist_name_with_underscores.replace("_", " ")
 
             context.user_data['waiting_for_task'] = checklist_name
@@ -1274,20 +1321,28 @@ def button_handler(update: Update, context: CallbackContext):
                 logger.error(f"Error in upgrade prompt: {e}")
                 query.answer("Error starting upgrade process. Please try /upgrade command.", show_alert=True)
         
-        elif callback_data == "settings":
+        elif callback_data == "settings":elif callback_data.startswith("delete_task_"):
             if not is_user_premium(chat_id):
-                send_premium_prompt(chat_id)
                 return
+                
+            parts = callback_data.split("_", 3)
+            if len(parts) < 4:
+                return
+                
+            checklist_name = parts[2]
+            task_id = parts[3]
             
-            settings = user_data.get("settings", {})
-            plan_type = user_data.get("premium_plan", "basic")
-            expiry = user_data.get("premium_expires")
-            if expiry:
-                expiry_date = datetime.datetime.fromisoformat(expiry).strftime("%B %d, %Y")
-                plan_info = f"{plan_type.title()} (expires {expiry_date})"
-            else:
-                plan_info = f"{plan_type.title()}"
-            
+            checklist_data = user_data["checklists"].get(checklist_name)
+            if checklist_data:
+                checklist = Checklist.from_dict(checklist_data)
+                task = checklist.get_task_by_id(task_id)
+                
+                if task and checklist.remove_task(task_id):
+                    data[str(chat_id)]["checklists"][checklist_name] = checklist.to_dict()
+                    save_data(data)
+                    
+                    query.answer(f"Task '{task.text}' deleted!", show_alert=True)
+                    send_checklist_message(chat_id, checklist_name)
             settings_text = (
                 "⚙️ *Your Settings:*\n\n"
                 f"⭐ Premium Plan: {plan_info}\n"
