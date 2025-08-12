@@ -261,7 +261,7 @@ def get_checklist_markup(chat_id, checklist_name="Daily"):
     action_buttons = []
     if is_user_premium(chat_id):
         action_buttons.extend([
-            InlineKeyboardButton("➕ Add", callback_data=f"add_{checklist_name}"),
+            InlineKeyboardButton("➕ Add", callback_data=f"add_task_{clean_checklist_name}"),
             InlineKeyboardButton("🗑️ Delete", callback_data=f"delete_mode_{checklist_name}")
         ])
     
@@ -1208,6 +1208,22 @@ def button_handler(update: Update, context: CallbackContext):
                 query.edit_message_text("❌ Deletion cancelled.")
             except BadRequest:
                 query.answer("Deletion cancelled.", show_alert=True)
+
+        elif callback_data.startswith("add_task_"):
+            if not is_user_premium(chat_id):
+                send_premium_prompt(chat_id)
+                return
+
+            checklist_name_with_underscores = callback_data.split("_", 2)[2]
+            checklist_name = checklist_name_with_underscores.replace("_", " ")
+
+            context.user_data['waiting_for_task'] = checklist_name
+
+            context.bot.send_message(
+                chat_id=chat_id,
+                text=f"📝 Please send me the task you want to add to '*{checklist_name}*'.",
+                parse_mode="Markdown"
+            )        
         
         elif callback_data == "create_new_list":
             if not is_user_premium(chat_id):
@@ -1393,6 +1409,42 @@ def send_premium_prompt(chat_id):
         reply_markup=keyboard
     )
 
+def handle_task_text(update: Update, context: CallbackContext):
+    chat_id = update.message.chat_id
+    user_data = ensure_user_exists(chat_id)
+
+    # Check if the user is in the state of adding a task
+    if 'waiting_for_task' in context.user_data:
+        checklist_name = context.user_data['waiting_for_task']
+        task_text = update.message.text
+        
+        data = load_data()
+        checklist_data = user_data["checklists"].get(checklist_name)
+        
+        if not checklist_data:
+            update.message.reply_text(f"❌ Checklist '{checklist_name}' does not exist.")
+            del context.user_data['waiting_for_task']
+            return
+            
+        checklist = Checklist.from_dict(checklist_data)
+        checklist.add_task(task_text)
+        
+        data[str(chat_id)]["checklists"][checklist_name] = checklist.to_dict()
+        save_data(data)
+        
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton(f"📋 View {checklist_name}", callback_data=f"showlist_{checklist_name}")
+        ]])
+        
+        update.message.reply_text(
+            f"✅ Task added to *{checklist_name}*:\n`{task_text}`",
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+        
+        # Clear the state so the next message isn't treated as a task
+        del context.user_data['waiting_for_task']
+
 def reset_tasks():
     """Enhanced daily task reset."""
     logger.info("Starting daily task reset...")
@@ -1504,6 +1556,7 @@ def main():
         dp.add_handler(CommandHandler("stats", stats_command))
         
         dp.add_handler(CallbackQueryHandler(button_handler))
+        dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_task_text))
         
         # Payment handlers
         dp.add_handler(PreCheckoutQueryHandler(pre_checkout_callback))
