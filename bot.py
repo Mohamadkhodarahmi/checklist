@@ -601,7 +601,7 @@ def delete_checklist(update: Update, context: CallbackContext):
     )
 
 def upgrade_premium(update: Update, context: CallbackContext):
-    """Fixed premium upgrade with proper Telegram Stars pricing."""
+    """Enhanced premium upgrade with multiple plan options."""
     # Handle both direct commands and button callbacks
     if hasattr(update, 'callback_query') and update.callback_query:
         chat_id = update.callback_query.message.chat_id
@@ -621,34 +621,212 @@ def upgrade_premium(update: Update, context: CallbackContext):
             message_method("⭐ You already have premium access!")
         return
 
-    # Fixed pricing for Telegram Stars
+    # Show plan selection instead of direct invoice
+    plan_text = (
+        "🌟 *Choose Your Premium Plan:*\n\n"
+        "💫 *Basic Plan* - 1 Star\n"
+        "• 7 days premium access\n"
+        "• Multiple checklists\n"
+        "• Basic task management\n\n"
+        "⭐ *Standard Plan* - 3 Stars\n"
+        "• 30 days premium access\n"
+        "• All basic features\n"
+        "• Advanced statistics\n"
+        "• Priority support\n\n"
+        "🌟 *Premium Plan* - 5 Stars\n"
+        "• 90 days premium access\n"
+        "• All standard features\n"
+        "• Custom settings\n"
+        "• Export/import data\n\n"
+        "💎 *Ultimate Plan* - 10 Stars\n"
+        "• 365 days premium access\n"
+        "• All premium features\n"
+        "• Lifetime updates\n"
+        "• VIP support"
+    )
+    
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("💫 Basic (1⭐) - 7 days", callback_data="buy_basic")],
+        [InlineKeyboardButton("⭐ Standard (3⭐) - 30 days", callback_data="buy_standard")],
+        [InlineKeyboardButton("🌟 Premium (5⭐) - 90 days", callback_data="buy_premium")],
+        [InlineKeyboardButton("💎 Ultimate (10⭐) - 365 days", callback_data="buy_ultimate")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_upgrade")]
+    ])
+    
     try:
-        context.bot.send_invoice(
-            chat_id=chat_id,
-            title="🌟 Premium Checklist Access",
-            description="Unlock premium features: multiple checklists, task management, custom settings, and more!",
-            payload="premium_1month",
-            provider_token=PROVIDER_TOKEN,
-            currency="XTR",
-            prices=[LabeledPrice("Premium Access (1 Month)", 5)],  # 5 stars for 1 month
-            start_parameter="premium-upgrade"
-        )
-        logger.info(f"Payment invoice sent to user {chat_id}")
-    except BadRequest as e:
-        logger.error(f"Payment invoice error: {e}")
-        if "Stars" in str(e):
-            message_method(
-                "⚠️ Telegram Stars payments are not available in your region yet.\n\n"
-                "Please check back later or contact support for alternative options."
+        if hasattr(update, 'callback_query') and update.callback_query:
+            update.callback_query.edit_message_text(
+                plan_text,
+                parse_mode="Markdown",
+                reply_markup=keyboard
             )
         else:
             message_method(
-                "❌ Unable to create payment invoice. Please try again later.\n\n"
-                f"Error: {str(e)}"
+                plan_text,
+                parse_mode="Markdown",
+                reply_markup=keyboard
             )
     except Exception as e:
-        logger.error(f"Unexpected payment error: {e}")
-        message_method("❌ An unexpected error occurred. Please try again later.")
+        logger.error(f"Error showing premium plans: {e}")
+        message_method("❌ Error displaying premium plans. Please try again.")
+
+def send_invoice_for_plan(chat_id, plan_type, context):
+    """Send invoice for specific premium plan."""
+    plans = {
+        "basic": {
+            "title": "💫 Basic Premium - 7 Days",
+            "description": "7 days of premium access with multiple checklists and basic task management.",
+            "price": 1,
+            "payload": "premium_basic_7d"
+        },
+        "standard": {
+            "title": "⭐ Standard Premium - 30 Days", 
+            "description": "30 days of premium access with advanced features and statistics.",
+            "price": 3,
+            "payload": "premium_standard_30d"
+        },
+        "premium": {
+            "title": "🌟 Premium Plan - 90 Days",
+            "description": "90 days of premium access with custom settings and data export.",
+            "price": 5,
+            "payload": "premium_premium_90d"
+        },
+        "ultimate": {
+            "title": "💎 Ultimate Plan - 365 Days",
+            "description": "365 days of premium access with all features and VIP support.",
+            "price": 10,
+            "payload": "premium_ultimate_365d"
+        }
+    }
+    
+    plan = plans.get(plan_type)
+    if not plan:
+        return False
+    
+    try:
+        context.bot.send_invoice(
+            chat_id=chat_id,
+            title=plan["title"],
+            description=plan["description"],
+            payload=plan["payload"],
+            provider_token=PROVIDER_TOKEN,
+            currency="XTR",
+            prices=[LabeledPrice(plan["title"], plan["price"])],
+            start_parameter=f"premium-{plan_type}"
+        )
+        logger.info(f"Payment invoice sent to user {chat_id} for {plan_type} plan")
+        return True
+    except BadRequest as e:
+        logger.error(f"Payment invoice error for {plan_type}: {e}")
+        if "Stars" in str(e):
+            context.bot.send_message(
+                chat_id=chat_id,
+                text="⚠️ Telegram Stars payments are not available in your region yet.\n\nPlease check back later or contact support."
+            )
+        else:
+            context.bot.send_message(
+                chat_id=chat_id,
+                text=f"❌ Unable to create payment invoice. Please try again later.\n\nError: {str(e)}"
+            )
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected payment error for {plan_type}: {e}")
+        context.bot.send_message(
+            chat_id=chat_id,
+            text="❌ An unexpected error occurred. Please try again later."
+        )
+        return False
+
+def successful_payment_callback(update: Update, context: CallbackContext):
+    """Enhanced payment success handler with multiple plan support."""
+    chat_id = update.message.chat_id
+    payment = update.message.successful_payment
+    
+    try:
+        # Extract plan details from payload
+        payload = payment.invoice_payload
+        plan_mapping = {
+            "premium_basic_7d": {"days": 7, "name": "Basic", "features": "basic"},
+            "premium_standard_30d": {"days": 30, "name": "Standard", "features": "standard"}, 
+            "premium_premium_90d": {"days": 90, "name": "Premium", "features": "premium"},
+            "premium_ultimate_365d": {"days": 365, "name": "Ultimate", "features": "ultimate"}
+        }
+        
+        plan_info = plan_mapping.get(payload, {"days": 7, "name": "Basic", "features": "basic"})
+        
+        # Calculate expiry date
+        expiry_date = datetime.datetime.now() + datetime.timedelta(days=plan_info["days"])
+        
+        # Update user data
+        data = load_data()
+        user_data = data.get(str(chat_id), {})
+        user_data["is_premium"] = True
+        user_data["premium_expires"] = expiry_date.isoformat()
+        user_data["premium_plan"] = plan_info["features"]  # Store plan type
+        data[str(chat_id)] = user_data
+        save_data(data)
+        
+        # Create feature list based on plan
+        if plan_info["features"] == "basic":
+            features = [
+                "• Multiple named checklists",
+                "• Basic task management",
+                "• Task completion tracking"
+            ]
+        elif plan_info["features"] == "standard":
+            features = [
+                "• Multiple named checklists", 
+                "• Advanced task management",
+                "• Progress statistics",
+                "• Priority support"
+            ]
+        elif plan_info["features"] == "premium":
+            features = [
+                "• All standard features",
+                "• Custom daily reset times",
+                "• Export/import checklists", 
+                "• Advanced notifications"
+            ]
+        else:  # ultimate
+            features = [
+                "• All premium features",
+                "• Unlimited checklists",
+                "• VIP support",
+                "• Lifetime updates",
+                "• Advanced analytics"
+            ]
+        
+        # Send success message
+        success_message = (
+            f"🎉 *Payment Successful!*\n\n"
+            f"⭐ Plan: {plan_info['name']} Premium\n"
+            f"📅 Duration: {plan_info['days']} days\n"
+            f"🗓️ Expires: {expiry_date.strftime('%B %d, %Y')}\n\n"
+            f"🌟 *Features Unlocked:*\n" + "\n".join(features) + "\n\n"
+            f"Type `/help` to see all available commands!"
+        )
+        
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📋 View Checklists", callback_data="show_all_lists")],
+            [InlineKeyboardButton("➕ Create New List", callback_data="create_new_list")],
+            [InlineKeyboardButton("📊 View Stats", callback_data="show_stats")]
+        ])
+        
+        update.message.reply_text(
+            success_message,
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+        
+        logger.info(f"Premium activated for user {chat_id}: {plan_info['name']} plan ({plan_info['days']} days)")
+        
+    except Exception as e:
+        logger.error(f"Error processing successful payment: {e}")
+        update.message.reply_text(
+            "✅ Payment received! However, there was an issue activating premium features. "
+            "Please contact support with your payment details."
+        )
+
 
 def stats_command(update: Update, context: CallbackContext):
     """Show user productivity statistics (premium feature)."""
@@ -793,6 +971,90 @@ def button_handler(update: Update, context: CallbackContext):
         
         if callback_data == "noop":
             return
+        
+        # Handle premium plan purchases
+        elif callback_data.startswith("buy_"):
+            plan_type = callback_data.split("_", 1)[1]
+            if send_invoice_for_plan(chat_id, plan_type, context):
+                query.edit_message_text(
+                    f"💳 Payment invoice sent!\n\nComplete the payment to activate your {plan_type.title()} plan."
+                )
+            else:
+                query.answer("Error creating payment invoice. Please try again.", show_alert=True)
+        
+        elif callback_data == "cancel_upgrade":
+            query.edit_message_text("❌ Premium upgrade cancelled.")
+        
+        elif callback_data == "show_stats":
+            if not is_user_premium(chat_id):
+                send_premium_prompt(chat_id)
+                return
+            
+            # Show stats in the same message
+            total_tasks = 0
+            completed_tasks = 0
+            total_checklists = len(user_data["checklists"])
+            
+            checklist_stats = []
+            
+            for name, checklist_data in user_data["checklists"].items():
+                checklist = Checklist.from_dict(checklist_data)
+                completed, total = checklist.get_progress()
+                total_tasks += total
+                completed_tasks += completed
+                
+                if total > 0:
+                    percentage = int((completed / total) * 100)
+                    checklist_stats.append(f"• *{name}*: {completed}/{total} ({percentage}%)")
+                else:
+                    checklist_stats.append(f"• *{name}*: Empty")
+            
+            overall_percentage = int((completed_tasks / total_tasks) * 100) if total_tasks > 0 else 0
+            
+            # Get premium plan info
+            plan_type = user_data.get("premium_plan", "basic")
+            expiry = user_data.get("premium_expires")
+            if expiry:
+                expiry_date = datetime.datetime.fromisoformat(expiry).strftime("%B %d, %Y")
+                plan_info = f"Plan: {plan_type.title()} (expires {expiry_date})"
+            else:
+                plan_info = f"Plan: {plan_type.title()}"
+            
+            stats_text = (
+                "📊 *Your Productivity Stats:*\n\n"
+                f"⭐ {plan_info}\n\n"
+                f"📋 Total Checklists: {total_checklists}\n"
+                f"📝 Total Tasks: {total_tasks}\n"
+                f"✅ Completed: {completed_tasks}\n"
+                f"📈 Overall Progress: {overall_percentage}%\n\n"
+                "*Checklist Breakdown:*\n" + "\n".join(checklist_stats[:5])  # Limit to 5 to avoid long messages
+            )
+            
+            if len(checklist_stats) > 5:
+                stats_text += f"\n... and {len(checklist_stats) - 5} more checklists"
+            
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 Refresh", callback_data="show_stats")],
+                [InlineKeyboardButton("📋 View Lists", callback_data="show_all_lists")],
+                [InlineKeyboardButton("❌ Close", callback_data="close_stats")]
+            ])
+            
+            try:
+                query.edit_message_text(
+                    stats_text,
+                    parse_mode="Markdown",
+                    reply_markup=keyboard
+                )
+            except BadRequest:
+                bot.send_message(
+                    chat_id=chat_id,
+                    text=stats_text,
+                    parse_mode="Markdown",
+                    reply_markup=keyboard
+                )
+        
+        elif callback_data == "close_stats":
+            query.edit_message_text("📊 Statistics closed.")
         
         elif callback_data.startswith("toggle_"):
             parts = callback_data.split("_", 2)
@@ -990,19 +1252,8 @@ def button_handler(update: Update, context: CallbackContext):
         
         elif callback_data == "upgrade_prompt":
             try:
-                # Send upgrade message
-                bot.send_message(
-                    chat_id=chat_id,
-                    text="🌟 Preparing upgrade options..."
-                )
-                # Create a fake update object for the upgrade function
-                fake_update = type('obj', (object,), {
-                    'message': type('obj', (object,), {
-                        'chat_id': chat_id,
-                        'reply_text': lambda text, **kwargs: bot.send_message(chat_id=chat_id, text=text, **kwargs)
-                    })()
-                })()
-                upgrade_premium(fake_update, context)
+                # Show upgrade options instead of direct payment
+                upgrade_premium(update, context)
             except Exception as e:
                 logger.error(f"Error in upgrade prompt: {e}")
                 query.answer("Error starting upgrade process. Please try /upgrade command.", show_alert=True)
@@ -1013,8 +1264,17 @@ def button_handler(update: Update, context: CallbackContext):
                 return
             
             settings = user_data.get("settings", {})
+            plan_type = user_data.get("premium_plan", "basic")
+            expiry = user_data.get("premium_expires")
+            if expiry:
+                expiry_date = datetime.datetime.fromisoformat(expiry).strftime("%B %d, %Y")
+                plan_info = f"{plan_type.title()} (expires {expiry_date})"
+            else:
+                plan_info = f"{plan_type.title()}"
+            
             settings_text = (
                 "⚙️ *Your Settings:*\n\n"
+                f"⭐ Premium Plan: {plan_info}\n"
                 f"🕐 Daily Reset Time: {settings.get('daily_reset_time', '08:00')}\n"
                 f"🌍 Timezone: {settings.get('timezone', 'UTC')}\n"
                 f"🔔 Notifications: {'Enabled' if settings.get('notifications_enabled', True) else 'Disabled'}\n\n"
@@ -1023,6 +1283,7 @@ def button_handler(update: Update, context: CallbackContext):
             
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔔 Toggle Notifications", callback_data="toggle_notifications")],
+                [InlineKeyboardButton("⭐ Upgrade Plan", callback_data="upgrade_prompt")],
                 [InlineKeyboardButton("❌ Close", callback_data="close_settings")]
             ])
             
@@ -1061,8 +1322,17 @@ def button_handler(update: Update, context: CallbackContext):
             query.answer(f"Notifications {status}!", show_alert=True)
             
             # Update the settings display
+            plan_type = user_data.get("premium_plan", "basic")
+            expiry = user_data.get("premium_expires")
+            if expiry:
+                expiry_date = datetime.datetime.fromisoformat(expiry).strftime("%B %d, %Y")
+                plan_info = f"{plan_type.title()} (expires {expiry_date})"
+            else:
+                plan_info = f"{plan_type.title()}"
+            
             settings_text = (
                 "⚙️ *Your Settings:*\n\n"
+                f"⭐ Premium Plan: {plan_info}\n"
                 f"🕐 Daily Reset Time: {settings.get('daily_reset_time', '08:00')}\n"
                 f"🌍 Timezone: {settings.get('timezone', 'UTC')}\n"
                 f"🔔 Notifications: {'Enabled' if settings.get('notifications_enabled', True) else 'Disabled'}\n\n"
@@ -1071,6 +1341,7 @@ def button_handler(update: Update, context: CallbackContext):
             
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔔 Toggle Notifications", callback_data="toggle_notifications")],
+                [InlineKeyboardButton("⭐ Upgrade Plan", callback_data="upgrade_prompt")],
                 [InlineKeyboardButton("❌ Close", callback_data="close_settings")]
             ])
             
@@ -1098,6 +1369,30 @@ def button_handler(update: Update, context: CallbackContext):
 # -----------------------
 # Enhanced Daily Reset
 # -----------------------
+def send_premium_prompt(chat_id):
+    """Sends an enhanced prompt to non-premium users to upgrade."""
+    message = (
+        "🌟 *Unlock Premium Features!*\n\n"
+        "💫 *Starting from just 1 Star:*\n"
+        "• Multiple named checklists\n"
+        "• Advanced task management\n"
+        "• Progress statistics\n"
+        "• Custom settings\n"
+        "• Priority support\n\n"
+        "Choose from 4 different plans to fit your needs!"
+    )
+    
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("⭐ View Plans & Upgrade", callback_data="upgrade_prompt")
+    ]])
+    
+    bot.send_message(
+        chat_id=chat_id,
+        text=message,
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
+
 def reset_tasks():
     """Enhanced daily task reset."""
     logger.info("Starting daily task reset...")
