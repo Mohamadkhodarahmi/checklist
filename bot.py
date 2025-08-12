@@ -1025,7 +1025,7 @@ def button_handler(update: Update, context: CallbackContext):
             stats_text = (
                 "📊 *Your Productivity Stats:*\n\n"
                 f"⭐ {plan_info}\n\n"def get_checklist_markup(chat_id, checklist_name="Daily"):
-    """Generates an enhanced inline keyboard markup for a specific checklist."""
+    """Generates an enhanced inline keyboard markup for a specific checklist.""")
     user_data = ensure_user_exists(chat_id)
     checklist_data = user_data["checklists"].get(checklist_name)
     
