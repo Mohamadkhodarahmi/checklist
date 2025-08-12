@@ -134,7 +134,6 @@ def load_data():
         return {}
     except json.JSONDecodeError as e:
         logger.error(f"Error decoding JSON: {e}")
-        # Backup corrupted file and start fresh
         backup_name = f"{TASK_FILE}.backup.{int(time.time())}"
         os.rename(TASK_FILE, backup_name)
         logger.info(f"Corrupted file backed up as {backup_name}")
@@ -146,7 +145,6 @@ def load_data():
 def save_data(data):
     """Saves bot data to the JSON file with atomic write."""
     try:
-        # Atomic write: write to temp file first, then rename
         temp_file = f"{TASK_FILE}.tmp"
         os.makedirs(os.path.dirname(TASK_FILE), exist_ok=True)
         
@@ -166,7 +164,6 @@ def ensure_user_exists(chat_id):
     chat_id_str = str(chat_id)
     
     if chat_id_str not in data:
-        # New user
         data[chat_id_str] = {
             "is_premium": False,
             "premium_expires": None,
@@ -180,10 +177,8 @@ def ensure_user_exists(chat_id):
             }
         }
     else:
-        # Migrate old format if needed
         user_data = data[chat_id_str]
         
-        # Add missing keys
         if "is_premium" not in user_data:
             user_data["is_premium"] = False
         if "premium_expires" not in user_data:
@@ -195,12 +190,10 @@ def ensure_user_exists(chat_id):
                 "notifications_enabled": True
             }
         
-        # Migrate old task format
         if "checklists" not in user_data:
             old_tasks = user_data.get("tasks", [])
             old_done = user_data.get("done", [])
             
-            # Convert old format to new format
             daily_checklist = Checklist("Daily")
             for i, task_text in enumerate(old_tasks):
                 task = daily_checklist.add_task(task_text)
@@ -211,28 +204,9 @@ def ensure_user_exists(chat_id):
                 "Daily": daily_checklist.to_dict()
             }
             
-            # Clean up old keys
             for old_key in ["tasks", "done"]:
                 if old_key in user_data:
                     del user_data[old_key]
-        else:
-            # Ensure all checklists are in new format
-            for name, checklist_data in user_data["checklists"].items():
-                if "tasks" in checklist_data and isinstance(checklist_data["tasks"], list):
-                    # Check if tasks are in old format (list of strings with separate done list)
-                    if (checklist_data["tasks"] and 
-                        isinstance(checklist_data["tasks"][0], str)):
-                        # Convert old format
-                        old_tasks = checklist_data["tasks"]
-                        old_done = checklist_data.get("done", [])
-                        
-                        checklist = Checklist(name)
-                        for i, task_text in enumerate(old_tasks):
-                            task = checklist.add_task(task_text)
-                            if i in old_done:
-                                task.completed = True
-                        
-                        user_data["checklists"][name] = checklist.to_dict()
     
     save_data(data)
     return data[chat_id_str]
@@ -243,11 +217,9 @@ def is_user_premium(chat_id) -> bool:
     if not user_data["is_premium"]:
         return False
     
-    # Check if premium has expired
     if user_data.get("premium_expires"):
         expiry = datetime.datetime.fromisoformat(user_data["premium_expires"])
         if datetime.datetime.now() > expiry:
-            # Premium expired, update status
             data = load_data()
             data[str(chat_id)]["is_premium"] = False
             data[str(chat_id)]["premium_expires"] = None
@@ -270,7 +242,6 @@ def get_checklist_markup(chat_id, checklist_name="Daily"):
     checklist = Checklist.from_dict(checklist_data)
     buttons = []
     
-    # Progress bar
     completed, total = checklist.get_progress()
     progress_text = f"Progress: {completed}/{total}"
     if total > 0:
@@ -280,26 +251,26 @@ def get_checklist_markup(chat_id, checklist_name="Daily"):
     
     buttons.append([InlineKeyboardButton(progress_text, callback_data="noop")])
     
-    # Task buttons
     for task in checklist.tasks:
         icon = "✅" if task.completed else "⬜️"
         label = f"{icon} {task.text}"
-        # Truncate long task names
         if len(label) > 35:
             label = label[:32] + "..."
         buttons.append([InlineKeyboardButton(label, callback_data=f"toggle_{checklist_name}_{task.id}")])
     
-    # Action buttons row
     action_buttons = []
     if is_user_premium(chat_id):
-        action_buttons.append(InlineKeyboardButton("➕ Add", callback_data=f"add_{checklist_name}"))
-        action_buttons.append(InlineKeyboardButton("🗑️ Delete", callback_data=f"delete_mode_{checklist_name}"))
+        action_buttons.extend([
+            InlineKeyboardButton("➕ Add", callback_data=f"add_{checklist_name}"),
+            InlineKeyboardButton("🗑️ Delete", callback_data=f"delete_mode_{checklist_name}")
+        ])
     
-    action_buttons.append(InlineKeyboardButton("🔄 Refresh", callback_data=f"refresh_{checklist_name}"))
-    action_buttons.append(InlineKeyboardButton("❌ Close", callback_data=f"close_{checklist_name}"))
+    action_buttons.extend([
+        InlineKeyboardButton("🔄 Refresh", callback_data=f"refresh_{checklist_name}"),
+        InlineKeyboardButton("❌ Close", callback_data=f"close_{checklist_name}")
+    ])
     
     if action_buttons:
-        # Split into rows if too many buttons
         if len(action_buttons) > 2:
             buttons.append(action_buttons[:2])
             buttons.append(action_buttons[2:])
@@ -317,7 +288,6 @@ def get_checklist_list_markup(chat_id):
         checklist = Checklist.from_dict(checklist_data)
         completed, total = checklist.get_progress()
         
-        # Add progress indicator
         if total > 0:
             percentage = int((completed / total) * 100)
             progress_emoji = "🟢" if percentage == 100 else "🟡" if percentage > 0 else "🔴"
@@ -327,7 +297,6 @@ def get_checklist_list_markup(chat_id):
         
         buttons.append([InlineKeyboardButton(label, callback_data=f"showlist_{name}")])
     
-    # Add management buttons for premium users
     if is_user_premium(chat_id):
         buttons.append([
             InlineKeyboardButton("➕ New List", callback_data="create_new_list"),
@@ -349,8 +318,7 @@ def send_checklist_message(chat_id, checklist_name="Daily"):
     checklist = Checklist.from_dict(checklist_data)
     completed, total = checklist.get_progress()
     
-    # Create a more informative header
-    header = f"📋 *{checklist_name}* — {today}\n"
+    header = f"📋 *{checklist_name}* -- {today}\n"
     if total > 0:
         percentage = int((completed / total) * 100)
         header += f"Progress: {completed}/{total} ({percentage}%)\n"
@@ -372,7 +340,7 @@ def send_premium_prompt(chat_id):
     """Sends an enhanced prompt to non-premium users to upgrade."""
     premium_features = [
         "• Multiple named checklists",
-        "• Task deletion and editing",
+        "• Task deletion and editing", 
         "• Custom daily reset times",
         "• Progress statistics",
         "• Export/import checklists"
@@ -381,7 +349,7 @@ def send_premium_prompt(chat_id):
     message = (
         "🌟 *Premium Features:*\n\n"
         + "\n".join(premium_features) +
-        "\n\nUpgrade now with `/upgrade` for just 1-5 Telegram Stars!"
+        "\n\nUpgrade now with `/upgrade` for just a few Telegram Stars!"
     )
     
     keyboard = InlineKeyboardMarkup([[
@@ -396,7 +364,7 @@ def send_premium_prompt(chat_id):
     )
 
 # -----------------------
-# Enhanced Bot Commands
+# Enhanced Bot Commands  
 # -----------------------
 def start(update: Update, context: CallbackContext):
     """Handles the /start command with enhanced welcome message."""
@@ -453,7 +421,7 @@ def help_command(update: Update, context: CallbackContext):
         help_text += "\n\n*Premium Commands:*\n" + "\n".join(premium_commands)
     else:
         help_text += "\n\n*Premium Commands:*\n(Available with `/upgrade`)\n" + "\n".join(premium_commands)
-        help_text += "\n\n⭐ Upgrade for just 1-5 Telegram Stars to unlock all features!"
+        help_text += "\n\n⭐ Upgrade for just a few Telegram Stars to unlock all features!"
     
     update.message.reply_text(help_text, parse_mode="Markdown")
 
@@ -476,13 +444,11 @@ def add_task(update: Update, context: CallbackContext):
 
     if is_user_premium(chat_id):
         if len(args) >= 2:
-            # Try to interpret first arg as checklist name
             potential_checklist = args[0]
             if potential_checklist in user_data["checklists"]:
                 checklist_name = potential_checklist
                 task_text = " ".join(args[1:])
             else:
-                # First arg is not a checklist, treat whole thing as task for Daily
                 checklist_name = "Daily"
                 task_text = " ".join(args)
         else:
@@ -492,7 +458,6 @@ def add_task(update: Update, context: CallbackContext):
         checklist_name = "Daily"
         task_text = " ".join(args)
 
-    # Add the task
     checklist_data = user_data["checklists"].get(checklist_name)
     if not checklist_data:
         update.message.reply_text(f"❌ Checklist '{checklist_name}' does not exist.")
@@ -501,7 +466,6 @@ def add_task(update: Update, context: CallbackContext):
     checklist = Checklist.from_dict(checklist_data)
     task = checklist.add_task(task_text)
     
-    # Save back to data
     data[str(chat_id)]["checklists"][checklist_name] = checklist.to_dict()
     save_data(data)
 
@@ -526,7 +490,6 @@ def show_checklist(update: Update, context: CallbackContext):
         return
         
     if not args:
-        # Show checklist selection menu
         update.message.reply_text(
             "📋 *Select a checklist to view:*",
             parse_mode="Markdown",
@@ -562,7 +525,6 @@ def new_checklist(update: Update, context: CallbackContext):
 
     checklist_name = " ".join(context.args)
     
-    # Validate checklist name
     if len(checklist_name) > 50:
         update.message.reply_text("❌ Checklist name must be 50 characters or less.")
         return
@@ -571,12 +533,10 @@ def new_checklist(update: Update, context: CallbackContext):
         update.message.reply_text(f"❌ Checklist '{checklist_name}' already exists.")
         return
     
-    # Check premium limit
-    if len(user_data["checklists"]) >= 10:  # Reasonable limit
+    if len(user_data["checklists"]) >= 10:
         update.message.reply_text("❌ Maximum of 10 checklists allowed. Delete some first.")
         return
 
-    # Create new checklist
     data = load_data()
     new_checklist = Checklist(checklist_name)
     data[str(chat_id)]["checklists"][checklist_name] = new_checklist.to_dict()
@@ -603,10 +563,9 @@ def delete_checklist(update: Update, context: CallbackContext):
         return
 
     if not context.args:
-        # Show deletion interface
         buttons = []
         for name in user_data["checklists"]:
-            if name != "Daily":  # Protect the Daily checklist
+            if name != "Daily":
                 buttons.append([InlineKeyboardButton(f"🗑️ {name}", callback_data=f"confirm_delete_{name}")])
         
         if not buttons:
@@ -630,7 +589,6 @@ def delete_checklist(update: Update, context: CallbackContext):
         update.message.reply_text(f"❌ Checklist '{checklist_name}' not found.")
         return
 
-    # Confirmation step
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Yes, Delete", callback_data=f"delete_confirmed_{checklist_name}")],
         [InlineKeyboardButton("❌ Cancel", callback_data="cancel_delete")]
@@ -656,40 +614,30 @@ def upgrade_premium(update: Update, context: CallbackContext):
             update.message.reply_text("⭐ You already have premium access!")
         return
 
-    # Fixed pricing for Telegram Stars (prices in stars, not cents)
-    prices = [
-        LabeledPrice("1 Month Premium", 1),  # 1 star
-        LabeledPrice("1 Year Premium", 5),   # 5 stars
-    ]
-    
+    # Fixed pricing for Telegram Stars
     try:
         context.bot.send_invoice(
             chat_id=chat_id,
             title="🌟 Premium Checklist Access",
-            description=(
-                "Unlock premium features:\n"
-                "• Multiple named checklists\n"
-                "• Task management tools\n"
-                "• Custom settings\n"
-                "• Progress statistics"
-            ),
-            payload="premium_subscription",
+            description="Unlock premium features: multiple checklists, task management, custom settings, and more!",
+            payload="premium_1month",
             provider_token=PROVIDER_TOKEN,
-            currency="XTR",  # Telegram Stars currency
-            prices=prices,
-            start_parameter="premium-upgrade",
-            is_flexible=False
+            currency="XTR",
+            prices=[LabeledPrice("Premium Access (1 Month)", 5)],  # 5 stars for 1 month
+            start_parameter="premium-upgrade"
         )
+        logger.info(f"Payment invoice sent to user {chat_id}")
     except BadRequest as e:
-        logger.error(f"Payment error: {e}")
-        if "Stars_invoice_invalid" in str(e):
+        logger.error(f"Payment invoice error: {e}")
+        if "Stars" in str(e):
             update.message.reply_text(
-                "❌ Payment system temporarily unavailable. Please try again later.\n\n"
-                "If this persists, please contact support."
+                "⚠️ Telegram Stars payments are not available in your region yet.\n\n"
+                "Please check back later or contact support for alternative options."
             )
         else:
             update.message.reply_text(
-                f"❌ Payment error: {str(e)}\n\nPlease try again or contact support."
+                "❌ Unable to create payment invoice. Please try again later.\n\n"
+                f"Error: {str(e)}"
             )
     except Exception as e:
         logger.error(f"Unexpected payment error: {e}")
@@ -743,12 +691,11 @@ def pre_checkout_callback(update: Update, context: CallbackContext):
     query = update.pre_checkout_query
     
     try:
-        if query.invoice_payload != "premium_subscription":
+        if not query.invoice_payload.startswith("premium_"):
             logger.warning(f"Invalid payload in pre-checkout: {query.invoice_payload}")
             query.answer(ok=False, error_message="Invalid payment request.")
             return
         
-        # Additional validation could be added here
         query.answer(ok=True)
         logger.info(f"Pre-checkout approved for user {query.from_user.id}")
         
@@ -762,16 +709,12 @@ def successful_payment_callback(update: Update, context: CallbackContext):
     payment = update.message.successful_payment
     
     try:
-        # Determine subscription length based on amount paid
-        total_amount = payment.total_amount
-        if total_amount == 1:  # 1 star
+        # Extract plan from payload
+        payload = payment.invoice_payload
+        if payload == "premium_1month":
             duration_days = 30
             plan_name = "1 Month"
-        elif total_amount == 5:  # 5 stars
-            duration_days = 365
-            plan_name = "1 Year"
         else:
-            logger.warning(f"Unexpected payment amount: {total_amount}")
             duration_days = 30
             plan_name = "1 Month"
         
@@ -786,7 +729,7 @@ def successful_payment_callback(update: Update, context: CallbackContext):
         data[str(chat_id)] = user_data
         save_data(data)
         
-        # Send success message with premium features info
+        # Send success message
         success_message = (
             f"🎉 *Payment Successful!*\n\n"
             f"⭐ Plan: {plan_name} Premium\n"
@@ -830,16 +773,15 @@ def button_handler(update: Update, context: CallbackContext):
     callback_data = query.data
     
     try:
-        query.answer()  # Always answer the callback query
+        query.answer()
         
         data = load_data()
         user_data = data.get(str(chat_id), {})
         
         if callback_data == "noop":
-            return  # Do nothing for progress bars, etc.
+            return
         
         elif callback_data.startswith("toggle_"):
-            # Toggle task completion: toggle_ChecklistName_TaskID
             parts = callback_data.split("_", 2)
             if len(parts) < 3:
                 return
@@ -851,34 +793,28 @@ def button_handler(update: Update, context: CallbackContext):
             if checklist_data:
                 checklist = Checklist.from_dict(checklist_data)
                 if checklist.toggle_task(task_id):
-                    # Save updated data
                     data[str(chat_id)]["checklists"][checklist_name] = checklist.to_dict()
                     save_data(data)
                     
-                    # Update the message
                     query.edit_message_reply_markup(
                         reply_markup=get_checklist_markup(chat_id, checklist_name)
                     )
         
         elif callback_data.startswith("showlist_"):
-            # Show specific checklist
             checklist_name = callback_data.split("_", 1)[1]
             send_checklist_message(chat_id, checklist_name)
         
         elif callback_data.startswith("refresh_"):
-            # Refresh checklist display
             checklist_name = callback_data.split("_", 1)[1]
             query.edit_message_reply_markup(
                 reply_markup=get_checklist_markup(chat_id, checklist_name)
             )
         
         elif callback_data.startswith("close_"):
-            # Close checklist
             checklist_name = callback_data.split("_", 1)[1]
             query.edit_message_text(f"📋 Checklist '{checklist_name}' closed.")
         
         elif callback_data.startswith("delete_mode_"):
-            # Enter task deletion mode (premium)
             if not is_user_premium(chat_id):
                 send_premium_prompt(chat_id)
                 return
@@ -892,7 +828,6 @@ def button_handler(update: Update, context: CallbackContext):
                     query.answer("No tasks to delete!", show_alert=True)
                     return
                 
-                # Show tasks for deletion
                 buttons = []
                 for task in checklist.tasks:
                     label = f"🗑️ {task.text[:30]}{'...' if len(task.text) > 30 else ''}"
@@ -910,7 +845,6 @@ def button_handler(update: Update, context: CallbackContext):
                 )
         
         elif callback_data.startswith("delete_task_"):
-            # Delete specific task (premium)
             if not is_user_premium(chat_id):
                 return
                 
@@ -924,7 +858,6 @@ def button_handler(update: Update, context: CallbackContext):
                 task = checklist.get_task_by_id(task_id)
                 
                 if task and checklist.remove_task(task_id):
-                    # Save updated data
                     data[str(chat_id)]["checklists"][checklist_name] = checklist.to_dict()
                     save_data(data)
                     
@@ -932,7 +865,6 @@ def button_handler(update: Update, context: CallbackContext):
                     send_checklist_message(chat_id, checklist_name)
         
         elif callback_data.startswith("confirm_delete_"):
-            # Confirm checklist deletion
             checklist_name = callback_data.split("_", 2)[2]
             
             keyboard = InlineKeyboardMarkup([
@@ -949,7 +881,6 @@ def button_handler(update: Update, context: CallbackContext):
             )
         
         elif callback_data.startswith("delete_confirmed_"):
-            # Actually delete the checklist
             if not is_user_premium(chat_id):
                 return
                 
@@ -967,14 +898,13 @@ def button_handler(update: Update, context: CallbackContext):
             query.edit_message_text("❌ Deletion cancelled.")
         
         elif callback_data == "create_new_list":
-            # Prompt for new checklist creation
             if not is_user_premium(chat_id):
                 send_premium_prompt(chat_id)
                 return
                 
             query.edit_message_text(
                 "➕ *Create New Checklist*\n\n"
-                "Use the command: `/new_checklist <n>`\n\n"
+                "Use the command: `/new_checklist <name>`\n\n"
                 "*Examples:*\n"
                 "• `/new_checklist Work Tasks`\n"
                 "• `/new_checklist Shopping List`\n"
@@ -983,7 +913,6 @@ def button_handler(update: Update, context: CallbackContext):
             )
         
         elif callback_data == "show_all_lists":
-            # Show all checklists
             bot.send_message(
                 chat_id=chat_id,
                 text="📋 *Your Checklists:*",
@@ -992,7 +921,6 @@ def button_handler(update: Update, context: CallbackContext):
             )
         
         elif callback_data == "upgrade_prompt":
-            # Trigger upgrade process
             context.bot.send_message(
                 chat_id=chat_id,
                 text="Preparing upgrade options..."
@@ -1000,7 +928,6 @@ def button_handler(update: Update, context: CallbackContext):
             upgrade_premium(update, context)
         
         elif callback_data == "settings":
-            # Show settings (premium feature)
             if not is_user_premium(chat_id):
                 send_premium_prompt(chat_id)
                 return
@@ -1015,7 +942,6 @@ def button_handler(update: Update, context: CallbackContext):
             )
             
             keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🕐 Change Reset Time", callback_data="change_reset_time")],
                 [InlineKeyboardButton("🔔 Toggle Notifications", callback_data="toggle_notifications")]
             ])
             
@@ -1026,7 +952,6 @@ def button_handler(update: Update, context: CallbackContext):
             )
         
         elif callback_data == "toggle_notifications":
-            # Toggle notification settings
             if not is_user_premium(chat_id):
                 return
                 
@@ -1039,19 +964,16 @@ def button_handler(update: Update, context: CallbackContext):
             
             status = "enabled" if not current else "disabled"
             query.answer(f"Notifications {status}!", show_alert=True)
-            
-            # Refresh settings display
-            button_handler(update, context)  # Recursively call to refresh settings
         
     except Exception as e:
         logger.error(f"Error in button handler: {e}")
         query.answer("An error occurred. Please try again.", show_alert=True)
 
 # -----------------------
-# Enhanced Daily Reset with Threading
+# Enhanced Daily Reset
 # -----------------------
 def reset_tasks():
-    """Enhanced daily task reset with better user experience."""
+    """Enhanced daily task reset."""
     logger.info("Starting daily task reset...")
     
     try:
@@ -1060,7 +982,6 @@ def reset_tasks():
         
         for user_id, user_data in data.items():
             try:
-                # Reset all checklists
                 for checklist_name, checklist_data in user_data.get("checklists", {}).items():
                     checklist = Checklist.from_dict(checklist_data)
                     checklist.reset_all()
@@ -1068,7 +989,6 @@ def reset_tasks():
                 
                 reset_count += 1
                 
-                # Send notification if enabled
                 settings = user_data.get("settings", {})
                 if settings.get("notifications_enabled", True):
                     try:
@@ -1116,12 +1036,11 @@ def run_scheduler():
     while True:
         try:
             schedule.run_pending()
-            time.sleep(60)  # Check every minute
+            time.sleep(60)
         except Exception as e:
             logger.error(f"Error in scheduler thread: {e}")
             time.sleep(60)
 
-# Schedule the daily reset
 schedule.every().day.at("08:00").do(reset_tasks)
 
 # -----------------------
@@ -1131,7 +1050,6 @@ def error_handler(update: object, context: CallbackContext) -> None:
     """Log errors caused by updates."""
     logger.error(f"Exception while handling an update: {context.error}")
     
-    # Try to inform the user
     if update and hasattr(update, 'effective_chat') and update.effective_chat:
         try:
             context.bot.send_message(
@@ -1139,7 +1057,7 @@ def error_handler(update: object, context: CallbackContext) -> None:
                 text="❌ An error occurred while processing your request. Please try again."
             )
         except:
-            pass  # If we can't send error message, just log it
+            pass
 
 # -----------------------
 # Enhanced Main Function
@@ -1152,7 +1070,6 @@ def main():
         updater = Updater(TOKEN)
         dp = updater.dispatcher
 
-        # Register error handler
         dp.add_error_handler(error_handler)
 
         # Command handlers
@@ -1165,24 +1082,21 @@ def main():
         dp.add_handler(CommandHandler("upgrade", upgrade_premium))
         dp.add_handler(CommandHandler("stats", stats_command))
         
-        # Callback query handler for buttons
         dp.add_handler(CallbackQueryHandler(button_handler))
         
         # Payment handlers
         dp.add_handler(PreCheckoutQueryHandler(pre_checkout_callback))
         dp.add_handler(MessageHandler(Filters.successful_payment, successful_payment_callback))
 
-        # Start scheduler in background thread
+        # Start scheduler
         scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
         scheduler_thread.start()
         logger.info("Scheduler thread started")
 
-        # Start the bot
         logger.info("Bot is starting...")
         updater.start_polling(drop_pending_updates=True)
         logger.info("Bot is now running! Press Ctrl+C to stop.")
         
-        # Keep the main thread alive
         updater.idle()
         
     except Exception as e:
